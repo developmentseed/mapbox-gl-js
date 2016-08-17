@@ -12,7 +12,10 @@ module.exports = function () {
     workerBus.target = parentBus;
     // workerBus substitutes the WebWorker global `self`, and Worker uses
     // self.importScripts for the 'load worker source' target.
-    workerBus.importScripts = function () {};
+    workerBus.importScripts = function (url) {
+        parentBus.scriptsImported = parentBus.scriptsImported || [];
+        parentBus.scriptsImported.push(url);
+    };
 
     new Worker(workerBus);
 

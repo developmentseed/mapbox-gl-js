@@ -11,7 +11,6 @@ var util = require('../util/util');
 var ajax = require('../util/ajax');
 var normalizeURL = require('../util/mapbox').normalizeStyleURL;
 var browser = require('../util/browser');
-var Dispatcher = require('../util/dispatcher');
 var AnimationLoop = require('./animation_loop');
 var validateStyle = require('./validate_style');
 var Source = require('../source/source');
@@ -27,7 +26,6 @@ module.exports = Style;
 
 function Style(stylesheet, animationLoop, workerCount) {
     this.animationLoop = animationLoop || new AnimationLoop();
-    this.dispatcher = new Dispatcher(workerPool, workerCount || 1, this);
     this.spriteAtlas = new SpriteAtlas(1024, 1024);
     this.lineAtlas = new LineAtlas(256, 512);
 
@@ -47,8 +45,6 @@ function Style(stylesheet, animationLoop, workerCount) {
     ], this);
 
     this._resetUpdates();
-
-    Source.on('_add', this._handleAddSourceType);
 
     var stylesheetLoaded = function(err, stylesheet) {
         if (err) {
@@ -78,31 +74,40 @@ function Style(stylesheet, animationLoop, workerCount) {
         this.fire('load');
     }.bind(this);
 
-    // register any existing custom source types with the workers
-    util.asyncAll(Source.getCustomTypeNames(), this._registerCustomSource, function (err) {
+    workerPool.createDispatcher(workerCount || 1, this, function (err, dispatcher) {
         if (err) {
-            this.fire('error', {error: err});
+            this.fire('error', { error: err });
             return;
         }
+        this.dispatcher = dispatcher;
+        Source.on('_add', this._handleAddSourceType);
+        // register any existing custom source types with the workers
+        util.asyncAll(Source.getCustomTypeNames(), this._registerCustomSource, function (err) {
+            if (err) {
+                this.fire('error', {error: err});
+                return;
+            }
 
-        if (typeof stylesheet === 'string') {
-            ajax.getJSON(normalizeURL(stylesheet), stylesheetLoaded);
-        } else {
-            browser.frame(stylesheetLoaded.bind(this, null, stylesheet));
-        }
-    }.bind(this));
+            if (typeof stylesheet === 'string') {
+                ajax.getJSON(normalizeURL(stylesheet), stylesheetLoaded);
+            } else {
+                browser.frame(stylesheetLoaded.bind(this, null, stylesheet));
+            }
+        }.bind(this));
 
-    this.on('source.load', function(event) {
-        var source = event.source;
-        if (source && source.vectorLayerIds) {
-            for (var layerId in this._layers) {
-                var layer = this._layers[layerId];
-                if (layer.source === source.id) {
-                    this._validateLayer(layer);
+
+        this.on('source.load', function(event) {
+            var source = event.source;
+            if (source && source.vectorLayerIds) {
+                for (var layerId in this._layers) {
+                    var layer = this._layers[layerId];
+                    if (layer.source === source.id) {
+                        this._validateLayer(layer);
+                    }
                 }
             }
-        }
-    });
+        });
+    }.bind(this));
 }
 
 Style.prototype = util.inherit(Evented, {

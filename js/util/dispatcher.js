@@ -12,12 +12,11 @@ module.exports = Dispatcher;
  * @interface Dispatcher
  * @private
  */
-function Dispatcher(workerPool, length, parent) {
-    this.workerPool = workerPool;
+function Dispatcher(id, workers, disposeWorkers, parent) {
+    this.id = id;
     this.actors = [];
     this.currentActor = 0;
-    this.id = util.uniqueId();
-    var workers = this.workerPool.acquire(this.id, length);
+    this._disposeWorkers = disposeWorkers;
     for (var i = 0; i < workers.length; i++) {
         var worker = workers[i];
         var actor = new Actor(worker, parent, this.id);
@@ -67,7 +66,7 @@ Dispatcher.prototype = {
     },
 
     remove: function() {
-        this.workerPool.release(this.id);
+        this._disposeWorkers();
         this.actors = [];
     }
 };

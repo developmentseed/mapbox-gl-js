@@ -1,7 +1,9 @@
 'use strict';
 
 var assert = require('assert');
+var util = require('./util');
 var WebWorker = require('./web_worker');
+var Dispatcher = require('./dispatcher');
 
 module.exports = WorkerPool;
 
@@ -11,25 +13,48 @@ function WorkerPool() {
 }
 
 WorkerPool.prototype = {
-    acquire: function (mapId, workerCount) {
-        this._resize(workerCount);
-        this.active[mapId] = workerCount;
-        return this.workers.slice(0, workerCount);
+    createDispatcher: function (workerCount, parent, callback) {
+        var mapId = util.uniqueId();
+        this._acquire(mapId, workerCount, function (err, workers) {
+            if (err) {
+                this._release(mapId);
+                return callback(err);
+            }
+
+            var dispose = this._release.bind(this, mapId);
+            var dispatcher = new Dispatcher(mapId, workers, dispose, parent);
+            callback(null, dispatcher);
+        }.bind(this));
     },
 
-    release: function (mapId) {
+    _acquire: function (mapId, workerCount, callback) {
+        this._resize(workerCount);
+        this.active[mapId] = workerCount;
+        callback(null, this.workers.slice(0, workerCount));
+    },
+
+    _release: function (mapId) {
         delete this.active[mapId];
         if (Object.keys(this.active).length === 0) {
-            this.workers.forEach(function (w) { w.terminate(); });
-            this.workers = [];
+            this._remove();
         }
+    },
+
+    _remove: function () {
+        this.workers.forEach(function (w) { w.terminate(); });
+        this._dispatcher = null;
+        this.workers = [];
     },
 
     _resize: function (len) {
         assert(typeof len === 'number');
+        var newWorkers = [];
         while (this.workers.length < len) {
-            this.workers.push(new WebWorker());
+            var w = new WebWorker();
+            this.workers.push(w);
+            newWorkers.push(w);
         }
+        return newWorkers;
     }
 };
 

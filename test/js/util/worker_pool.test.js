@@ -3,41 +3,50 @@
 var test = require('tap').test;
 var WorkerPool = require('../../../js/util/worker_pool');
 
-test('WorkerPool', function (t) {
-    t.test('#acquire', function (t) {
+test('WorkerPool#createDispatcher', function (t) {
+    t.test('creates dispatchers with shared workers', function (t) {
         var pool = new WorkerPool();
 
         t.equal(pool.workers.length, 0);
-        var workers1 = pool.acquire('map-1', 4);
-        t.equal(workers1.length, 4);
 
-        var workers2 = pool.acquire('map-2', 8);
-        t.equal(workers2.length, 8);
-        t.equal(pool.workers.length, 8);
+        pool.createDispatcher(4, {}, function (err, dispatcher) {
+            t.error(err);
+            t.equal(dispatcher.actors.length, 4);
+            pool.createDispatcher(8, {}, function (err, dispatcher2) {
+                t.error(err);
+                t.equal(dispatcher2.actors.length, 8);
 
-        // check that the two different dispatchers' workers arrays correspond
-        workers1.forEach(function (w, i) { t.equal(w, workers2[i]); });
-        t.end();
+                var workers1 = dispatcher.actors.map(function (a) { return a.target; });
+                var workers2 = dispatcher2.actors.map(function (a) { return a.target; });
+                // check that the two different dispatchers' workers arrays correspond
+                workers1.forEach(function (w, i) { t.equal(w, workers2[i]); });
+                t.end();
+            });
+        });
     });
 
-    t.test('#release', function (t) {
+    t.test('handles dispose()', function (t) {
         var pool = new WorkerPool();
-        pool.acquire('map-1', 1);
-        var workers = pool.acquire('map-2', 4);
-        var terminated = 0;
-        workers.forEach(function (w) {
-            w.terminate = function () { terminated += 1; };
+        pool.createDispatcher(1, {}, function (err, d1) {
+            t.error(err);
+            pool.createDispatcher(4, {}, function (err, d4) {
+                t.error(err);
+                var terminated = 0;
+                pool.workers.forEach(function (w) {
+                    w.terminate = function () { terminated += 1; };
+                });
+
+                d4.remove();
+                t.comment('keeps workers if a dispatcher is still active');
+                t.equal(terminated, 0);
+                t.equal(pool.workers.length, 4);
+
+                t.comment('terminates workers if no dispatchers are active');
+                d1.remove();
+                t.equal(terminated, 4);
+                t.equal(pool.workers.length, 0);
+            });
         });
-
-        pool.release('map-2');
-        t.comment('keeps workers if a dispatcher is still active');
-        t.equal(terminated, 0);
-        t.equal(pool.workers.length, 4);
-
-        t.comment('terminates workers if no dispatchers are active');
-        pool.release('map-1');
-        t.equal(terminated, 4);
-        t.equal(pool.workers.length, 0);
 
         t.end();
     });
