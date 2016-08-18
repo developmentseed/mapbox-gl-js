@@ -1,10 +1,16 @@
 'use strict';
 
 var test = require('tap').test;
-var Source = require('../../../js/source/source');
+var proxyquire = require('proxyquire');
 
 test('Source', function (t) {
     t.test('#getCustomTypeNames', function (t) {
+        var Source = proxyquire('../../../js/source/source', {
+            '../shared_global': {
+                workerPool: { registerCustomSource: function () {} }
+            }
+        });
+
         t.same(Source.getCustomTypeNames(), []);
         Source.addType('source.test.type-1', function () {});
         t.same(Source.getCustomTypeNames(), ['source.test.type-1']);
@@ -13,18 +19,33 @@ test('Source', function (t) {
 
     t.test('#addType', function (t) {
         function SourceType () {}
-        Source.on('_add', onAdd);
+        var Source = proxyquire('../../../js/source/source', {
+            '../shared_global': {
+                workerPool: { registerCustomSource: registerCustomSource }
+            }
+        });
+        Source.on('add', onAdd);
 
-        t.plan(2);
         Source.addType('source.test.type-2', SourceType);
         t.equal(Source.getType('source.test.type-2'), SourceType);
+        function registerCustomSource (name, callback) {
+            t.equal(name, 'source.test.type-2');
+            setTimeout(callback, 0);
+        }
         function onAdd (event) {
             t.equal(event.name, 'source.test.type-2');
-            Source.off('_add', onAdd);
+            Source.off('add', onAdd);
+            t.end();
         }
     });
 
     t.test('#addType throws for duplicate source type', function (t) {
+        var Source = proxyquire('../../../js/source/source', {
+            '../shared_global': {
+                workerPool: { registerCustomSource: function () {} }
+            }
+        });
+
         Source.addType('source.test.type-3', function () {});
         t.throws(function () {
             Source.addType('source.test.type-3', function () {});

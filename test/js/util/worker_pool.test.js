@@ -1,7 +1,10 @@
 'use strict';
 
 var test = require('tap').test;
+var proxyquire = require('proxyquire');
+var util = require('../../../js/util/util');
 var WorkerPool = require('../../../js/util/worker_pool');
+var WebWorker = require('../../../js/util/web_worker');
 
 test('WorkerPool#createDispatcher', function (t) {
     t.test('creates dispatchers with shared workers', function (t) {
@@ -49,6 +52,44 @@ test('WorkerPool#createDispatcher', function (t) {
         });
 
         t.end();
+    });
+
+    t.test('registers WorkerSource for custom sources', function (t) {
+        function MySourceType () {}
+        MySourceType.workerSourceURL = 'my-worker-source.js';
+        function WorkerlessSourceType () {}
+        var _types = { 'my-source-type': MySourceType, 'workerless': WorkerlessSourceType };
+
+        function MockWebWorker () {
+            this.worker = new WebWorker();
+            util.extend(this, this.worker);
+            this.messages = [];
+            this.postMessage = function (message) {
+                this.messages.push(message);
+                this.worker.postMessage(message);
+            };
+        }
+
+        var WorkerPool = proxyquire('../../../js/util/worker_pool', {
+            '../source/source': {
+                getType: function (name) { return _types[name]; },
+                setType: function () {},
+                getCustomTypeNames: function () { return Object.keys(_types); },
+                off: function () {}
+            },
+            './web_worker': MockWebWorker
+        });
+
+        var pool = new WorkerPool();
+        pool.createDispatcher(4, {}, function (err) {
+            t.error(err);
+            t.equal(pool.workers.length, 4);
+            pool.workers.forEach(function (w) {
+                t.equal(w.messages.length, 1);
+                t.same(w.messages[0].data, { name: 'my-source-type', url: 'my-worker-source.js' });
+            });
+            t.end();
+        });
     });
 
     t.end();

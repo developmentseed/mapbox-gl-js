@@ -13,6 +13,8 @@ mapboxgl.Attribution = require('./ui/control/attribution');
 mapboxgl.Popup = require('./ui/popup');
 mapboxgl.Marker = require('./ui/marker');
 
+require('./util/worker_pool'); // ensure that global worker pool is initialized
+
 mapboxgl.Style = require('./style/style');
 mapboxgl.Source = require('./source/source');
 

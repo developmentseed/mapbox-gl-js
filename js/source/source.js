@@ -2,6 +2,7 @@
 
 var Evented = require('../util/evented');
 var util = require('../util/util');
+var sharedGlobal = require('../shared_global');
 
 var sourceTypes = {
     'vector': require('../source/vector_tile_source'),
@@ -13,7 +14,8 @@ var sourceTypes = {
 
 var coreTypes = ['vector', 'raster', 'geojson', 'video', 'image'];
 
-var Source = module.exports = util.extend({}, Evented);
+var Source = module.exports;
+Object.assign(Source, Evented);
 
 /*
  * Creates a tiled data source instance given an options object.
@@ -67,9 +69,13 @@ Source.addType = function (name, SourceType) {
 
     Source.setType(name, SourceType);
 
-    // an internal event, used to notify Style instances that there is a new
-    // custom source type.
-    Source.fire('_add', { name: name });
+    sharedGlobal.workerPool.registerCustomSource(name, function (err) {
+        if (err) {
+            Source.fire('error', { error: err });
+            return;
+        }
+        Source.fire('add', { name: name });
+    });
 };
 
 

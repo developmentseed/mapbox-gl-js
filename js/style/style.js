@@ -1,6 +1,5 @@
 'use strict';
 
-var assert = require('assert');
 var Evented = require('../util/evented');
 var StyleLayer = require('./style_layer');
 var ImageSprite = require('./image_sprite');
@@ -13,14 +12,12 @@ var normalizeURL = require('../util/mapbox').normalizeStyleURL;
 var browser = require('../util/browser');
 var AnimationLoop = require('./animation_loop');
 var validateStyle = require('./validate_style');
-var Source = require('../source/source');
 var QueryFeatures = require('../source/query_features');
 var SourceCache = require('../source/source_cache');
 var styleSpec = require('./style_spec');
 var StyleFunction = require('./style_function');
-var WorkerPool = require('../util/worker_pool');
 
-var workerPool = new WorkerPool();
+var sharedGlobal = require('../shared_global');
 
 module.exports = Style;
 
@@ -39,9 +36,7 @@ function Style(stylesheet, animationLoop, workerCount) {
         '_forwardSourceEvent',
         '_forwardTileEvent',
         '_forwardLayerEvent',
-        '_redoPlacement',
-        '_handleAddSourceType',
-        '_registerCustomSource'
+        '_redoPlacement'
     ], this);
 
     this._resetUpdates();
@@ -74,27 +69,17 @@ function Style(stylesheet, animationLoop, workerCount) {
         this.fire('load');
     }.bind(this);
 
-    workerPool.createDispatcher(workerCount || 1, this, function (err, dispatcher) {
+    sharedGlobal.workerPool.createDispatcher(workerCount || 1, this, function (err, dispatcher) {
         if (err) {
             this.fire('error', { error: err });
             return;
         }
         this.dispatcher = dispatcher;
-        Source.on('_add', this._handleAddSourceType);
-        // register any existing custom source types with the workers
-        util.asyncAll(Source.getCustomTypeNames(), this._registerCustomSource, function (err) {
-            if (err) {
-                this.fire('error', {error: err});
-                return;
-            }
-
-            if (typeof stylesheet === 'string') {
-                ajax.getJSON(normalizeURL(stylesheet), stylesheetLoaded);
-            } else {
-                browser.frame(stylesheetLoaded.bind(this, null, stylesheet));
-            }
-        }.bind(this));
-
+        if (typeof stylesheet === 'string') {
+            ajax.getJSON(normalizeURL(stylesheet), stylesheetLoaded);
+        } else {
+            browser.frame(stylesheetLoaded.bind(this, null, stylesheet));
+        }
 
         this.on('source.load', function(event) {
             var source = event.source;
@@ -701,32 +686,8 @@ Style.prototype = util.inherit(Evented, {
         return action.call(validateStyle, this, result);
     },
 
-    _handleAddSourceType: function (event) {
-        this._registerCustomSource(event.name, function (err) {
-            if (err) {
-                this.fire('error', {error: err});
-                return;
-            }
-            this.fire('source-type.add', event);
-        }.bind(this));
-    },
-
-    _registerCustomSource: function (name, callback) {
-        var SourceType = Source.getType(name);
-        assert(SourceType);
-        if (SourceType.workerSourceURL) {
-            this.dispatcher.broadcast('load worker source', {
-                name: name,
-                url: SourceType.workerSourceURL
-            }, callback);
-        } else {
-            callback();
-        }
-    },
-
     _remove: function() {
         this.dispatcher.remove();
-        Source.off('_add', this._handleAddSourceType);
     },
 
     _reloadSource: function(id) {

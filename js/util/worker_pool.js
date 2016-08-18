@@ -4,6 +4,7 @@ var assert = require('assert');
 var util = require('./util');
 var WebWorker = require('./web_worker');
 var Dispatcher = require('./dispatcher');
+var Source = require('../source/source');
 
 module.exports = WorkerPool;
 
@@ -27,10 +28,40 @@ WorkerPool.prototype = {
         }.bind(this));
     },
 
+    registerCustomSource: function (name, callback, newWorkers) {
+        var SourceType = Source.getType(name);
+        assert(SourceType);
+
+        if (SourceType.workerSourceURL) {
+            var workers = newWorkers || this.workers;
+            var dispatcher = new Dispatcher(util.uniqueId(), workers, function () {}, this);
+            dispatcher.broadcast('load worker source', {
+                name: name,
+                url: SourceType.workerSourceURL
+            }, function (err) {
+                dispatcher.remove();
+                callback(err);
+            });
+        } else {
+            callback();
+        }
+    },
+
     _acquire: function (mapId, workerCount, callback) {
-        this._resize(workerCount);
+        var newWorkers = this._resize(workerCount);
         this.active[mapId] = workerCount;
-        callback(null, this.workers.slice(0, workerCount));
+
+        // register any existing custom source types with the newly-created
+        // workers
+        util.asyncAll(Source.getCustomTypeNames(), function (name, done) {
+            this.registerCustomSource(name, done, newWorkers);
+        }.bind(this), function (err) {
+            if (err) {
+                this.fire('error', {error: err});
+                return;
+            }
+            callback(null, this.workers.slice(0, workerCount));
+        }.bind(this));
     },
 
     _release: function (mapId) {
@@ -57,4 +88,6 @@ WorkerPool.prototype = {
         return newWorkers;
     }
 };
+
+require('../shared_global').workerPool = new WorkerPool();
 
