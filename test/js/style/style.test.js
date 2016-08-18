@@ -131,6 +131,54 @@ test('Style', function(t) {
         });
     });
 
+    t.test('registers WorkerSource for custom sources', function (t) {
+        function MySourceType () {}
+        MySourceType.workerSourceURL = 'my-worker-source.js';
+        function LaterSourceType () {}
+        LaterSourceType.workerSourceURL = 'later-worker-source.js';
+        function WorkerlessSourceType () {}
+        var _types = { 'my-source-type': MySourceType, 'workerless': WorkerlessSourceType };
+
+        var expected = [
+            { name: 'my-source-type', url: 'my-worker-source.js' },
+            { name: 'later-source-type', url: 'later-worker-source.js' }
+        ];
+
+        t.plan(2 * expected.length);
+
+        function Dispatcher () {}
+        Dispatcher.prototype = {
+            broadcast: function (type, params, callback) {
+                if (type === 'load worker source') {
+                    var exp = expected.shift();
+                    t.equal(params.name, exp.name);
+                    t.equal(params.url, exp.url);
+                    setTimeout(callback, 0);
+                }
+            }
+        };
+
+        var Style = proxyquire('../../../js/style/style', {
+            '../source/source': {
+                getType: function (name) { return _types[name]; },
+                setType: function () {},
+                getCustomTypeNames: function () { return Object.keys(_types); },
+                on: function (type, handler) {
+                    if (type === '_add') {
+                        setTimeout(function () {
+                            _types['later-source-type'] = LaterSourceType;
+                            handler({ name: 'later-source-type' });
+                        });
+                    }
+                },
+                off: function () {}
+            },
+            '../util/dispatcher': Dispatcher
+        });
+
+        new Style(createStyleJSON());
+    });
+
     t.end();
 });
 
@@ -1172,60 +1220,6 @@ test('Style#query*Features', function(t) {
             t.throws(function() {
                 t.deepEqual(style.queryRenderedFeatures([10, 100], {filter: 7}), []);
             }, /queryRenderedFeatures\.filter/);
-            t.end();
-        });
-    });
-
-    t.end();
-});
-
-test('Style#addSourceType', function (t) {
-    var _types = { 'existing': function () {} };
-    var Style = proxyquire('../../../js/style/style', {
-        '../source/source': {
-            getType: function (name) { return _types[name]; },
-            setType: function (name, create) { _types[name] = create; }
-        }
-    });
-
-    t.test('adds factory function', function (t) {
-        var style = new Style(createStyleJSON());
-        var SourceType = function () {};
-
-        // expect no call to load worker source
-        style.dispatcher.broadcast = function (type) {
-            if (type === 'load worker source') {
-                t.fail();
-            }
-        };
-
-        style.addSourceType('foo', SourceType, function () {
-            t.equal(_types['foo'], SourceType);
-            t.end();
-        });
-    });
-
-    t.test('triggers workers to load worker source code', function (t) {
-        var style = new Style(createStyleJSON());
-        var SourceType = function () {};
-        SourceType.workerSourceURL = 'worker-source.js';
-
-        style.dispatcher.broadcast = function (type, params) {
-            if (type === 'load worker source') {
-                t.equal(_types['bar'], SourceType);
-                t.equal(params.name, 'bar');
-                t.equal(params.url, 'worker-source.js');
-                t.end();
-            }
-        };
-
-        style.addSourceType('bar', SourceType, function (err) { t.error(err); });
-    });
-
-    t.test('refuses to add new type over existing name', function (t) {
-        var style = new Style(createStyleJSON());
-        style.addSourceType('existing', function () {}, function (err) {
-            t.ok(err);
             t.end();
         });
     });

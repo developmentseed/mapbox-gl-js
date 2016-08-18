@@ -1,5 +1,6 @@
 'use strict';
 
+var assert = require('assert');
 var Evented = require('../util/evented');
 var StyleLayer = require('./style_layer');
 var ImageSprite = require('./image_sprite');
@@ -37,10 +38,14 @@ function Style(stylesheet, animationLoop, workerCount) {
         '_forwardSourceEvent',
         '_forwardTileEvent',
         '_forwardLayerEvent',
-        '_redoPlacement'
+        '_redoPlacement',
+        '_handleAddSourceType',
+        '_registerCustomSource'
     ], this);
 
     this._resetUpdates();
+
+    Source.on('_add', this._handleAddSourceType);
 
     var stylesheetLoaded = function(err, stylesheet) {
         if (err) {
@@ -70,11 +75,19 @@ function Style(stylesheet, animationLoop, workerCount) {
         this.fire('load');
     }.bind(this);
 
-    if (typeof stylesheet === 'string') {
-        ajax.getJSON(normalizeURL(stylesheet), stylesheetLoaded);
-    } else {
-        browser.frame(stylesheetLoaded.bind(this, null, stylesheet));
-    }
+    // register any existing custom source types with the workers
+    util.asyncAll(Source.getCustomTypeNames(), this._registerCustomSource, function (err) {
+        if (err) {
+            this.fire('error', {error: err});
+            return;
+        }
+
+        if (typeof stylesheet === 'string') {
+            ajax.getJSON(normalizeURL(stylesheet), stylesheetLoaded);
+        } else {
+            browser.frame(stylesheetLoaded.bind(this, null, stylesheet));
+        }
+    }.bind(this));
 
     this.on('source.load', function(event) {
         var source = event.source;
@@ -669,23 +682,6 @@ Style.prototype = util.inherit(Evented, {
         return source ? QueryFeatures.source(source, params) : [];
     },
 
-    addSourceType: function (name, SourceType, callback) {
-        if (Source.getType(name)) {
-            return callback(new Error('A source type called "' + name + '" already exists.'));
-        }
-
-        Source.setType(name, SourceType);
-
-        if (!SourceType.workerSourceURL) {
-            return callback(null, null);
-        }
-
-        this.dispatcher.broadcast('load worker source', {
-            name: name,
-            url: SourceType.workerSourceURL
-        }, callback);
-    },
-
     _handleErrors: function(validate, key, value, throws, props) {
         var action = throws ? validateStyle.throwErrors : validateStyle.emitErrors;
         var result = validate.call(validateStyle, util.extend({
@@ -697,8 +693,32 @@ Style.prototype = util.inherit(Evented, {
         return action.call(validateStyle, this, result);
     },
 
+    _handleAddSourceType: function (event) {
+        this._registerCustomSource(event.name, function (err) {
+            if (err) {
+                this.fire('error', {error: err});
+                return;
+            }
+            this.fire('source-type.add', event);
+        }.bind(this));
+    },
+
+    _registerCustomSource: function (name, callback) {
+        var SourceType = Source.getType(name);
+        assert(SourceType);
+        if (SourceType.workerSourceURL) {
+            this.dispatcher.broadcast('load worker source', {
+                name: name,
+                url: SourceType.workerSourceURL
+            }, callback);
+        } else {
+            callback();
+        }
+    },
+
     _remove: function() {
         this.dispatcher.remove();
+        Source.off('_add', this._handleAddSourceType);
     },
 
     _reloadSource: function(id) {
