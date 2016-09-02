@@ -14,7 +14,7 @@ module.exports = function () {
     // self.importScripts for the 'load worker source' target.
     workerBus.importScripts = function () {};
 
-    new Worker(workerBus);
+    workerBus._worker = new Worker(workerBus);
 
     return parentBus;
 };
