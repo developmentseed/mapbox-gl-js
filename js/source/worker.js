@@ -28,7 +28,7 @@ function Worker(self) {
 
     this.self.registerWorkerSource = function (name, WorkerSource) {
         if (this.workerSourceTypes[name]) {
-            throw new Error('Worker source with name "' + name + '" already registered.');
+            util.warnOnce('Worker source named "' + name + '" already registered.');
         }
         this.workerSourceTypes[name] = WorkerSource;
     }.bind(this);
@@ -148,7 +148,16 @@ util.extend(Worker.prototype, {
                 getLayers: function () { return this.layers[mapId]; }.bind(this),
                 getLayerFamilies: function () { return this.layerFamilies[mapId]; }.bind(this)
             };
-            this.workerSources[mapId][type] = new this.workerSourceTypes[type](this.actor, layers);
+
+            // use a wrapped actor so that we can attach a target mapId param
+            // to any messages invoked by the WorkerSource
+            var actor = {
+                send: function (type, data, callback, buffers) {
+                    this.actor.send(type, data, callback, buffers, mapId);
+                }.bind(this)
+            };
+
+            this.workerSources[mapId][type] = new this.workerSourceTypes[type](actor, layers);
         }
 
         return this.workerSources[mapId][type];

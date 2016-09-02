@@ -13,7 +13,6 @@ var browser = require('../util/browser');
 var Dispatcher = require('../util/dispatcher');
 var AnimationLoop = require('./animation_loop');
 var validateStyle = require('./validate_style');
-var Source = require('../source/source');
 var QueryFeatures = require('../source/query_features');
 var SourceCache = require('../source/source_cache');
 var styleSpec = require('./style_spec');
@@ -667,23 +666,6 @@ Style.prototype = util.inherit(Evented, {
         }
         var source = this.sources[sourceID];
         return source ? QueryFeatures.source(source, params) : [];
-    },
-
-    addSourceType: function (name, SourceType, callback) {
-        if (Source.getType(name)) {
-            return callback(new Error('A source type called "' + name + '" already exists.'));
-        }
-
-        Source.setType(name, SourceType);
-
-        if (!SourceType.workerSourceURL) {
-            return callback(null, null);
-        }
-
-        this.dispatcher.broadcast('load worker source', {
-            name: name,
-            url: SourceType.workerSourceURL
-        }, callback);
     },
 
     _handleErrors: function(validate, key, value, throws, props) {
