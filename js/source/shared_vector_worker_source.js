@@ -60,7 +60,9 @@ function setTileProperties (vt, propertyData) {
         for (let i = 0; i < layer._features.length; i++) {
             const feature = layer._features[i];
             const id = feature.properties.id;
-            feature.properties = opath.get(propertyData, id, feature.properties);
+            if (typeof id !== 'undefined') {
+                feature.properties = opath.get(propertyData, id, feature.properties);
+            }
         }
     }
 }
