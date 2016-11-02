@@ -14,6 +14,7 @@ const preloading = {};
 function getCachedTile (url, callback) {
     let cached = cache.get(url);
     if (cached) {
+        cache.add(url, cached);
         return callback(null, cached);
     }
 
