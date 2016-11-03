@@ -63,8 +63,7 @@ const defaultOptions = {
  * Then Mapbox GL JS initializes the map on the page and returns your `Map`
  * object.
  *
- * The `Map` inherits event methods from [`Evented`](#Evented).
- *
+ * @extends Evented
  * @param {Object} options
  * @param {HTMLElement|string} options.container The HTML element in which Mapbox GL JS will render the map, or the element's string `id`.
  * @param {number} [options.minZoom=0] The minimum zoom level of the map (1-20).
@@ -1463,7 +1462,7 @@ function removeNode(node) {
 
  /**
   * A `MapDataEvent` object is emitted with the [`Map#data`](#Map.event:data)
-  * and [`Map#data`](#Map.event:dataloading) events. Possible values for
+  * and [`Map#dataloading`](#Map.event:dataloading) events. Possible values for
   * `dataType`s are:
   *
   * - `'source'`: The non-tile data associated with any source

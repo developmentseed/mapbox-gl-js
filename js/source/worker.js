@@ -8,6 +8,9 @@ const GeoJSONWorkerSource = require('./geojson_worker_source');
 const SharedVectorWorkerSource = require('./shared_vector_worker_source');
 const assert = require('assert');
 
+/**
+ * @private
+ */
 class Worker {
     constructor(self) {
         this.self = self;

@@ -4,7 +4,7 @@ const Point = require('point-geometry');
 const loadGeometry = require('./load_geometry');
 const EXTENT = require('./extent');
 const featureFilter = require('feature-filter');
-const StructArrayType = require('../util/struct_array');
+const createStructArrayType = require('../util/struct_array');
 const Grid = require('grid-index');
 const DictionaryCoder = require('../util/dictionary_coder');
 const vt = require('vector-tile');
@@ -17,7 +17,7 @@ const multiPolygonIntersectsBufferedMultiPoint = intersection.multiPolygonInters
 const multiPolygonIntersectsMultiPolygon = intersection.multiPolygonIntersectsMultiPolygon;
 const multiPolygonIntersectsBufferedMultiLine = intersection.multiPolygonIntersectsBufferedMultiLine;
 
-const FeatureIndexArray = new StructArrayType({
+const FeatureIndexArray = createStructArrayType({
     members: [
         // the index of the feature in the original vectortile
         { type: 'Uint32', name: 'featureIndex' },
@@ -25,7 +25,8 @@ const FeatureIndexArray = new StructArrayType({
         { type: 'Uint16', name: 'sourceLayerIndex' },
         // the bucket the feature appears in
         { type: 'Uint16', name: 'bucketIndex' }
-    ]});
+    ]
+});
 
 class FeatureIndex {
     constructor(coord, overscaling, collisionTile) {
@@ -50,9 +51,9 @@ class FeatureIndex {
         this.setCollisionTile(collisionTile);
     }
 
-    insert(feature, featureIndex, sourceLayerIndex, bucketIndex) {
+    insert(feature, bucketIndex) {
         const key = this.featureIndexArray.length;
-        this.featureIndexArray.emplaceBack(featureIndex, sourceLayerIndex, bucketIndex);
+        this.featureIndexArray.emplaceBack(feature.index, feature.sourceLayerIndex, bucketIndex);
         const geometry = loadGeometry(feature);
 
         for (let r = 0; r < geometry.length; r++) {
@@ -75,17 +76,17 @@ class FeatureIndex {
         this.collisionTile = collisionTile;
     }
 
-    serialize() {
-        const data = {
+    serialize(transferables) {
+        const grid = this.grid.toArrayBuffer();
+        if (transferables) {
+            transferables.push(grid);
+        }
+        return {
             coord: this.coord,
             overscaling: this.overscaling,
-            grid: this.grid.toArrayBuffer(),
-            featureIndexArray: this.featureIndexArray.serialize(),
+            grid: grid,
+            featureIndexArray: this.featureIndexArray.serialize(transferables),
             bucketLayerIDs: this.bucketLayerIDs
-        };
-        return {
-            data: data,
-            transferables: [data.grid, data.featureIndexArray.arrayBuffer]
         };
     }
 
@@ -115,6 +116,8 @@ class FeatureIndex {
                 styleLayerDistance = getLineWidth(paint) / 2 + Math.abs(paint['line-offset']) + translateDistance(paint['line-translate']);
             } else if (styleLayer.type === 'fill') {
                 styleLayerDistance = translateDistance(paint['fill-translate']);
+            } else if (styleLayer.type === 'fill-extrusion') {
+                styleLayerDistance = translateDistance(paint['fill-extrusion-translate']);
             } else if (styleLayer.type === 'circle') {
                 styleLayerDistance = paint['circle-radius'] + translateDistance(paint['circle-translate']);
             }
@@ -146,7 +149,7 @@ class FeatureIndex {
         matching.sort(topDownFeatureComparator);
         this.filterMatching(result, matching, this.featureIndexArray, queryGeometry, filter, params.layers, styleLayers, args.bearing, pixelsToTileUnits);
 
-        const matchingSymbols = this.collisionTile.queryRenderedSymbols(minX, minY, maxX, maxY, args.scale);
+        const matchingSymbols = this.collisionTile.queryRenderedSymbols(queryGeometry, args.scale);
         matchingSymbols.sort();
         this.filterMatching(result, matchingSymbols, this.collisionTile.collisionBoxArray, queryGeometry, filter, params.layers, styleLayers, args.bearing, pixelsToTileUnits);
 
@@ -203,9 +206,10 @@ class FeatureIndex {
                         }
                         if (!multiPolygonIntersectsBufferedMultiLine(translatedPolygon, geometry, halfWidth)) continue;
 
-                    } else if (styleLayer.type === 'fill') {
+                    } else if (styleLayer.type === 'fill' || styleLayer.type === 'fill-extrusion') {
+                        const typePrefix = styleLayer.type;
                         translatedPolygon = translate(queryGeometry,
-                                paint['fill-translate'], paint['fill-translate-anchor'],
+                                paint[`${typePrefix}-translate`], paint[`${typePrefix}-translate-anchor`],
                                 bearing, pixelsToTileUnits);
                         if (!multiPolygonIntersectsMultiPolygon(translatedPolygon, geometry)) continue;
 

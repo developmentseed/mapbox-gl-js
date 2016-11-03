@@ -17,7 +17,7 @@ class Light extends Evented {
     constructor(lightOptions) {
         super();
         this.properties = ['anchor', 'color', 'position', 'intensity'];
-        this._specifications = styleSpec.$root.light;
+        this._specifications = styleSpec.light;
         this.set(lightOptions);
     }
 
@@ -94,9 +94,9 @@ class Light extends Evented {
         }
     }
 
-    recalculate(zoom, zoomHistory) {
+    recalculate(zoom) {
         for (const property in this._declarations) {
-            this.calculated[property] = this.getLightValue(property, {zoom: zoom, zoomHistory: zoomHistory});
+            this.calculated[property] = this.getLightValue(property, {zoom: zoom});
         }
     }
 

@@ -19,8 +19,8 @@ const AttributeType = {
  */
 class Buffer {
     /**
-     * @param {object} array A serialized StructArray.
-     * @param {object} arrayType A serialized StructArrayType.
+     * @param {Object} array A serialized StructArray.
+     * @param {Object} arrayType A serialized StructArrayType.
      * @param {BufferType} type
      */
     constructor(array, arrayType, type) {
@@ -30,6 +30,10 @@ class Buffer {
         this.itemSize = arrayType.bytesPerElement;
         this.type = type;
         this.arrayType = arrayType;
+    }
+
+    static fromStructArray(array, type) {
+        return new Buffer(array.serialize(), array.constructor.serialize(), type);
     }
 
     /**
@@ -56,8 +60,9 @@ class Buffer {
      * Set the attribute pointers in a WebGL context
      * @param gl The WebGL context
      * @param program The active WebGL program
+     * @param vertexOffset Index of the starting vertex of the segment
      */
-    setVertexAttribPointers(gl, program) {
+    setVertexAttribPointers(gl, program, vertexOffset) {
         for (let j = 0; j < this.attributes.length; j++) {
             const member = this.attributes[j];
             const attribIndex = program[member.name];
@@ -69,7 +74,7 @@ class Buffer {
                     gl[AttributeType[member.type]],
                     false,
                     this.arrayType.bytesPerElement,
-                    member.offset
+                    member.offset + (this.arrayType.bytesPerElement * vertexOffset || 0)
                 );
             }
         }

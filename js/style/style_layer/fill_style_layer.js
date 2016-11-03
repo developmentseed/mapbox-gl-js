@@ -1,6 +1,7 @@
 'use strict';
 
 const StyleLayer = require('../style_layer');
+const FillBucket = require('../../data/bucket/fill_bucket');
 
 class FillStyleLayer extends StyleLayer {
 
@@ -42,6 +43,10 @@ class FillStyleLayer extends StyleLayer {
         } else {
             return super.isPaintValueZoomConstant(name);
         }
+    }
+
+    createBucket(options) {
+        return new FillBucket(options);
     }
 }
 

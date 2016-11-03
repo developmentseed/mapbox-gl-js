@@ -1,123 +1,117 @@
 'use strict';
 
 const Bucket = require('../bucket');
+const createVertexArrayType = require('../vertex_array_type');
+const createElementArrayType = require('../element_array_type');
 const loadGeometry = require('../load_geometry');
 const earcut = require('earcut');
 const classifyRings = require('../../util/classify_rings');
-const Point = require('point-geometry');
+const assert = require('assert');
 const EARCUT_MAX_RINGS = 500;
 
-const fillInterfaces = {
-    fill: {
-        layoutVertexArrayType: new Bucket.VertexArrayType([{
-            name: 'a_pos',
-            components: 2,
-            type: 'Int16'
-        }]),
-        elementArrayType: new Bucket.ElementArrayType(1),
-        elementArrayType2: new Bucket.ElementArrayType(2),
+const fillInterface = {
+    layoutVertexArrayType: createVertexArrayType([{
+        name: 'a_pos',
+        components: 2,
+        type: 'Int16'
+    }]),
+    elementArrayType: createElementArrayType(3),
+    elementArrayType2: createElementArrayType(2),
 
-        paintAttributes: [{
-            name: 'a_color',
-            components: 4,
-            type: 'Uint8',
-            getValue: (layer, globalProperties, featureProperties) => {
-                return layer.getPaintValue("fill-color", globalProperties, featureProperties);
-            },
-            multiplier: 255,
-            paintProperty: 'fill-color'
-        }, {
-            name: 'a_outline_color',
-            components: 4,
-            type: 'Uint8',
-            getValue: (layer, globalProperties, featureProperties) => {
-                return layer.getPaintValue("fill-outline-color", globalProperties, featureProperties);
-            },
-            multiplier: 255,
-            paintProperty: 'fill-outline-color'
-        }, {
-            name: 'a_opacity',
-            components: 1,
-            type: 'Uint8',
-            getValue: (layer, globalProperties, featureProperties) => {
-                return [layer.getPaintValue("fill-opacity", globalProperties, featureProperties)];
-            },
-            multiplier: 255,
-            paintProperty: 'fill-opacity'
-        }]
-    }
+    paintAttributes: [{
+        name: 'a_color',
+        components: 4,
+        type: 'Uint8',
+        getValue: (layer, globalProperties, featureProperties) => {
+            return layer.getPaintValue("fill-color", globalProperties, featureProperties);
+        },
+        multiplier: 255,
+        paintProperty: 'fill-color'
+    }, {
+        name: 'a_outline_color',
+        components: 4,
+        type: 'Uint8',
+        getValue: (layer, globalProperties, featureProperties) => {
+            return layer.getPaintValue("fill-outline-color", globalProperties, featureProperties);
+        },
+        multiplier: 255,
+        paintProperty: 'fill-outline-color'
+    }, {
+        name: 'a_opacity',
+        components: 1,
+        type: 'Uint8',
+        getValue: (layer, globalProperties, featureProperties) => {
+            return [layer.getPaintValue("fill-opacity", globalProperties, featureProperties)];
+        },
+        multiplier: 255,
+        paintProperty: 'fill-opacity'
+    }]
 };
 
 class FillBucket extends Bucket {
-    get programInterfaces() {
-        return fillInterfaces;
-    }
-
-    addVertex(vertexArray, x, y) {
-        return vertexArray.emplaceBack(x, y);
+    constructor(options) {
+        super(options, fillInterface);
     }
 
     addFeature(feature) {
-        const lines = loadGeometry(feature);
-        const polygons = convertCoords(classifyRings(lines, EARCUT_MAX_RINGS));
+        const arrays = this.arrays;
 
-        this.factor = Math.pow(2, 13);
+        for (const polygon of classifyRings(loadGeometry(feature), EARCUT_MAX_RINGS)) {
+            let numVertices = 0;
+            for (const ring of polygon) {
+                numVertices += ring.length;
+            }
 
-        const startGroup = this.prepareArrayGroup('fill', 0);
-        const startIndex = startGroup.layoutVertexArray.length;
+            const triangleSegment = arrays.prepareSegment(numVertices);
+            const triangleIndex = triangleSegment.vertexLength;
 
-        for (let i = 0; i < polygons.length; i++) {
-            this.addPolygon(polygons[i]);
-        }
+            const flattened = [];
+            const holeIndices = [];
 
-        this.populatePaintArrays('fill', {zoom: this.zoom}, feature.properties, startGroup, startIndex);
-    }
-
-    addPolygon(polygon) {
-        let numVertices = 0;
-        for (let k = 0; k < polygon.length; k++) {
-            numVertices += polygon[k].length;
-        }
-
-        const group = this.prepareArrayGroup('fill', numVertices);
-        const flattened = [];
-        const holeIndices = [];
-        const startIndex = group.layoutVertexArray.length;
-
-        const indices = [];
-
-        for (let r = 0; r < polygon.length; r++) {
-            const ring = polygon[r];
-
-            if (r > 0) holeIndices.push(flattened.length / 2);
-
-            for (let v = 0; v < ring.length; v++) {
-                const v1 = ring[v];
-
-                const index = this.addVertex(group.layoutVertexArray, v1[0], v1[1], 0, 0, 1, 1, 0);
-                indices.push(index);
-
-                if (v >= 1) {
-                    group.elementArray2.emplaceBack(index - 1, index);
+            for (const ring of polygon) {
+                if (ring.length === 0) {
+                    continue;
                 }
 
-                // convert to format used by earcut
-                flattened.push(v1[0]);
-                flattened.push(v1[1]);
+                if (ring !== polygon[0]) {
+                    holeIndices.push(flattened.length / 2);
+                }
+
+                const lineSegment = arrays.prepareSegment2(ring.length);
+                const lineIndex = lineSegment.vertexLength;
+
+                arrays.layoutVertexArray.emplaceBack(ring[0].x, ring[0].y);
+                arrays.elementArray2.emplaceBack(lineIndex + ring.length - 1, lineIndex);
+                flattened.push(ring[0].x);
+                flattened.push(ring[0].y);
+
+                for (let i = 1; i < ring.length; i++) {
+                    arrays.layoutVertexArray.emplaceBack(ring[i].x, ring[i].y);
+                    arrays.elementArray2.emplaceBack(lineIndex + i - 1, lineIndex + i);
+                    flattened.push(ring[i].x);
+                    flattened.push(ring[i].y);
+                }
+
+                lineSegment.vertexLength += ring.length;
+                lineSegment.primitiveLength += ring.length;
             }
+
+            const indices = earcut(flattened, holeIndices);
+            assert(indices.length % 3 === 0);
+
+            for (let i = 0; i < indices.length; i += 3) {
+                arrays.elementArray.emplaceBack(
+                    triangleIndex + indices[i],
+                    triangleIndex + indices[i + 1],
+                    triangleIndex + indices[i + 2]);
+            }
+
+            triangleSegment.vertexLength += numVertices;
+            triangleSegment.primitiveLength += indices.length / 3;
         }
 
-        const triangleIndices = earcut(flattened, holeIndices);
-
-        for (let i = 0; i < triangleIndices.length; i++) {
-            group.elementArray.emplaceBack(triangleIndices[i] + startIndex);
-        }
+        arrays.populatePaintArrays(feature.properties);
     }
 }
 
 module.exports = FillBucket;
-
-function convertCoords(rings) {
-    if (rings instanceof Point) return [rings.x, rings.y];
-    return rings.map(convertCoords);
-}

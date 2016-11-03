@@ -2,7 +2,6 @@
 
 const FeatureIndex = require('../data/feature_index');
 const CollisionTile = require('../symbol/collision_tile');
-const Bucket = require('../data/bucket');
 const CollisionBoxArray = require('../symbol/collision_box');
 const DictionaryCoder = require('../util/dictionary_coder');
 const util = require('../util/util');
@@ -44,9 +43,11 @@ class WorkerTile {
         const buckets = {};
         let bucketIndex = 0;
 
-        let icons = {};
-        let stacks = {};
-        const dependencies = {icons, stacks};
+        const options = {
+            featureIndex: featureIndex,
+            iconDependencies: {},
+            glyphDependencies: {}
+        };
 
         const layerFamilies = layerIndex.familiesBySource[this.source];
         for (const sourceLayerId in layerFamilies) {
@@ -63,10 +64,12 @@ class WorkerTile {
                 );
             }
 
+            const sourceLayerIndex = sourceLayerCoder.encode(sourceLayerId);
             const features = [];
             for (let i = 0; i < sourceLayer.length; i++) {
                 const feature = sourceLayer.feature(i);
                 feature.index = i;
+                feature.sourceLayerIndex = sourceLayerIndex;
                 features.push(feature);
             }
 
@@ -79,22 +82,24 @@ class WorkerTile {
                 if (layer.maxzoom && this.zoom >= layer.maxzoom) continue;
                 if (layer.layout && layer.layout.visibility === 'none') continue;
 
-                const bucket = buckets[layer.id] = Bucket.create({
-                    layer: layer,
-                    index: bucketIndex++,
-                    childLayers: family,
+                for (const layer of family) {
+                    layer.recalculate(this.zoom);
+                }
+
+                const bucket = buckets[layer.id] = layer.createBucket({
+                    index: bucketIndex,
+                    layers: family,
                     zoom: this.zoom,
                     overscaling: this.overscaling,
-                    showCollisionBoxes: this.showCollisionBoxes,
                     collisionBoxArray: this.collisionBoxArray,
                     symbolQuadsArray: this.symbolQuadsArray,
-                    symbolInstancesArray: this.symbolInstancesArray,
-                    sourceLayerIndex: sourceLayerCoder.encode(sourceLayerId),
-                    featureIndex: featureIndex
+                    symbolInstancesArray: this.symbolInstancesArray
                 });
 
-                bucket.populate(features, dependencies);
-                featureIndex.bucketLayerIDs[bucket.index] = family.map(getLayerId);
+                bucket.populate(features, options);
+                featureIndex.bucketLayerIDs[bucketIndex] = family.map((l) => l.id);
+
+                bucketIndex++;
             }
         }
 
@@ -106,23 +111,15 @@ class WorkerTile {
                 this.redoPlacementAfterDone = false;
             }
 
-            const featureIndex_ = featureIndex.serialize();
-            const collisionTile_ = collisionTile.serialize();
-            const collisionBoxArray = this.collisionBoxArray.serialize();
-            const symbolInstancesArray = this.symbolInstancesArray.serialize();
-            const symbolQuadsArray = this.symbolQuadsArray.serialize();
-            const nonEmptyBuckets = util.values(buckets).filter(isBucketNonEmpty);
-
+            const transferables = [];
             callback(null, {
-                buckets: nonEmptyBuckets.map(serializeBucket),
-                featureIndex: featureIndex_.data,
-                collisionTile: collisionTile_.data,
-                collisionBoxArray: collisionBoxArray,
-                symbolInstancesArray: symbolInstancesArray,
-                symbolQuadsArray: symbolQuadsArray
-            }, getTransferables(nonEmptyBuckets)
-                .concat(featureIndex_.transferables)
-                .concat(collisionTile_.transferables));
+                buckets: serializeBuckets(util.values(buckets), transferables),
+                featureIndex: featureIndex.serialize(transferables),
+                collisionTile: collisionTile.serialize(transferables),
+                collisionBoxArray: this.collisionBoxArray.serialize(transferables),
+                symbolInstancesArray: this.symbolInstancesArray.serialize(transferables),
+                symbolQuadsArray: this.symbolQuadsArray.serialize(transferables)
+            }, transferables);
         };
 
         // Symbol buckets must be placed in reverse order.
@@ -130,7 +127,7 @@ class WorkerTile {
         for (let i = layerIndex.order.length - 1; i >= 0; i--) {
             const id = layerIndex.order[i];
             const bucket = buckets[id];
-            if (bucket && bucket.type === 'symbol') {
+            if (bucket && bucket.layers[0].type === 'symbol') {
                 this.symbolBuckets.push(bucket);
             }
         }
@@ -140,22 +137,25 @@ class WorkerTile {
         }
 
         let deps = 0;
+        let icons = Object.keys(options.iconDependencies);
+        let stacks = util.mapObject(options.glyphDependencies, (glyphs) => Object.keys(glyphs).map(Number));
 
         const gotDependency = (err) => {
             if (err) return callback(err);
             deps++;
             if (deps === 2) {
                 for (const bucket of this.symbolBuckets) {
+                    // Layers are shared and may have been used by a WorkerTile with a different zoom.
+                    for (const layer of bucket.layers) {
+                        layer.recalculate(this.zoom);
+                    }
+
                     bucket.prepare(stacks, icons);
                     bucket.place(collisionTile, this.showCollisionBoxes);
                 }
                 done();
             }
         };
-
-        for (const fontName in stacks) {
-            stacks[fontName] = Object.keys(stacks[fontName]).map(Number);
-        }
 
         if (Object.keys(stacks).length) {
             actor.send('getGlyphs', {uid: this.uid, stacks: stacks}, (err, newStacks) => {
@@ -165,8 +165,6 @@ class WorkerTile {
         } else {
             gotDependency();
         }
-
-        icons = Object.keys(icons);
 
         if (icons.length) {
             actor.send('getIcons', {icons: icons}, (err, newIcons) => {
@@ -186,41 +184,31 @@ class WorkerTile {
         }
 
         const collisionTile = new CollisionTile(angle, pitch, this.collisionBoxArray);
+
         for (const bucket of this.symbolBuckets) {
+            // Layers are shared and may have been used by a WorkerTile with a different zoom.
+            for (const layer of bucket.layers) {
+                layer.recalculate(this.zoom);
+            }
+
             bucket.place(collisionTile, showCollisionBoxes);
         }
 
-        const collisionTile_ = collisionTile.serialize();
-        const nonEmptyBuckets = this.symbolBuckets.filter(isBucketNonEmpty);
-
+        const transferables = [];
         return {
             result: {
-                buckets: nonEmptyBuckets.map(serializeBucket),
-                collisionTile: collisionTile_.data
+                buckets: serializeBuckets(this.symbolBuckets, transferables),
+                collisionTile: collisionTile.serialize(transferables)
             },
-            transferables: getTransferables(nonEmptyBuckets).concat(collisionTile_.transferables)
+            transferables: transferables
         };
     }
 }
 
-function isBucketNonEmpty(bucket) {
-    return !bucket.isEmpty();
-}
-
-function serializeBucket(bucket) {
-    return bucket.serialize();
-}
-
-function getTransferables(buckets) {
-    const transferables = [];
-    for (const i in buckets) {
-        buckets[i].getTransferables(transferables);
-    }
-    return transferables;
-}
-
-function getLayerId(layer) {
-    return layer.id;
+function serializeBuckets(buckets, transferables) {
+    return buckets
+        .filter((b) => !b.isEmpty())
+        .map((b) => b.serialize(transferables));
 }
 
 module.exports = WorkerTile;

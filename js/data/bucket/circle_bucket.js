@@ -1,60 +1,66 @@
 'use strict';
 
 const Bucket = require('../bucket');
+const createVertexArrayType = require('../vertex_array_type');
+const createElementArrayType = require('../element_array_type');
 const loadGeometry = require('../load_geometry');
 const EXTENT = require('../extent');
 
-const circleInterfaces = {
-    circle: {
-        layoutVertexArrayType: new Bucket.VertexArrayType([{
-            name: 'a_pos',
-            components: 2,
-            type: 'Int16'
-        }]),
-        elementArrayType: new Bucket.ElementArrayType(),
+const circleInterface = {
+    layoutVertexArrayType: createVertexArrayType([{
+        name: 'a_pos',
+        components: 2,
+        type: 'Int16'
+    }]),
+    elementArrayType: createElementArrayType(),
 
-        paintAttributes: [{
-            name: 'a_color',
-            components: 4,
-            type: 'Uint8',
-            getValue: (layer, globalProperties, featureProperties) => {
-                return layer.getPaintValue("circle-color", globalProperties, featureProperties);
-            },
-            multiplier: 255,
-            paintProperty: 'circle-color'
-        }, {
-            name: 'a_radius',
-            components: 1,
-            type: 'Uint16',
-            isLayerConstant: false,
-            getValue: (layer, globalProperties, featureProperties) => {
-                return [layer.getPaintValue("circle-radius", globalProperties, featureProperties)];
-            },
-            multiplier: 10,
-            paintProperty: 'circle-radius'
-        }, {
-            name: 'a_blur',
-            components: 1,
-            type: 'Uint16',
-            isLayerConstant: false,
-            getValue: (layer, globalProperties, featureProperties) => {
-                return [layer.getPaintValue("circle-blur", globalProperties, featureProperties)];
-            },
-            multiplier: 10,
-            paintProperty: 'circle-blur'
-        }, {
-            name: 'a_opacity',
-            components: 1,
-            type: 'Uint16',
-            isLayerConstant: false,
-            getValue: (layer, globalProperties, featureProperties) => {
-                return [layer.getPaintValue("circle-opacity", globalProperties, featureProperties)];
-            },
-            multiplier: 255,
-            paintProperty: 'circle-opacity'
-        }]
-    }
+    paintAttributes: [{
+        name: 'a_color',
+        components: 4,
+        type: 'Uint8',
+        getValue: (layer, globalProperties, featureProperties) => {
+            return layer.getPaintValue("circle-color", globalProperties, featureProperties);
+        },
+        multiplier: 255,
+        paintProperty: 'circle-color'
+    }, {
+        name: 'a_radius',
+        components: 1,
+        type: 'Uint16',
+        isLayerConstant: false,
+        getValue: (layer, globalProperties, featureProperties) => {
+            return [layer.getPaintValue("circle-radius", globalProperties, featureProperties)];
+        },
+        multiplier: 10,
+        paintProperty: 'circle-radius'
+    }, {
+        name: 'a_blur',
+        components: 1,
+        type: 'Uint16',
+        isLayerConstant: false,
+        getValue: (layer, globalProperties, featureProperties) => {
+            return [layer.getPaintValue("circle-blur", globalProperties, featureProperties)];
+        },
+        multiplier: 10,
+        paintProperty: 'circle-blur'
+    }, {
+        name: 'a_opacity',
+        components: 1,
+        type: 'Uint16',
+        isLayerConstant: false,
+        getValue: (layer, globalProperties, featureProperties) => {
+            return [layer.getPaintValue("circle-opacity", globalProperties, featureProperties)];
+        },
+        multiplier: 255,
+        paintProperty: 'circle-opacity'
+    }]
 };
+
+function addCircleVertex(layoutVertexArray, x, y, extrudeX, extrudeY) {
+    layoutVertexArray.emplaceBack(
+        (x * 2) + ((extrudeX + 1) / 2),
+        (y * 2) + ((extrudeY + 1) / 2));
+}
 
 /**
  * Circles are represented by two triangles.
@@ -64,29 +70,17 @@ const circleInterfaces = {
  * @private
  */
 class CircleBucket extends Bucket {
-
-    addCircleVertex(layoutVertexArray, x, y, extrudeX, extrudeY) {
-        return layoutVertexArray.emplaceBack(
-                (x * 2) + ((extrudeX + 1) / 2),
-                (y * 2) + ((extrudeY + 1) / 2));
-    }
-
-    get programInterfaces() {
-        return circleInterfaces;
+    constructor(options) {
+        super(options, circleInterface);
     }
 
     addFeature(feature) {
-        const globalProperties = {zoom: this.zoom};
-        const geometries = loadGeometry(feature);
+        const arrays = this.arrays;
 
-        const startGroup = this.prepareArrayGroup('circle', 0);
-        const startIndex = startGroup.layoutVertexArray.length;
-
-        for (let j = 0; j < geometries.length; j++) {
-            for (let k = 0; k < geometries[j].length; k++) {
-
-                const x = geometries[j][k].x;
-                const y = geometries[j][k].y;
+        for (const ring of loadGeometry(feature)) {
+            for (const point of ring) {
+                const x = point.x;
+                const y = point.y;
 
                 // Do not include points that are outside the tile boundaries.
                 if (x < 0 || x >= EXTENT || y < 0 || y >= EXTENT) continue;
@@ -100,20 +94,23 @@ class CircleBucket extends Bucket {
                 // │ 0     1 │
                 // └─────────┘
 
-                const group = this.prepareArrayGroup('circle', 4);
-                const layoutVertexArray = group.layoutVertexArray;
+                const segment = arrays.prepareSegment(4);
+                const index = segment.vertexLength;
 
-                const index = this.addCircleVertex(layoutVertexArray, x, y, -1, -1);
-                this.addCircleVertex(layoutVertexArray, x, y, 1, -1);
-                this.addCircleVertex(layoutVertexArray, x, y, 1, 1);
-                this.addCircleVertex(layoutVertexArray, x, y, -1, 1);
+                addCircleVertex(arrays.layoutVertexArray, x, y, -1, -1);
+                addCircleVertex(arrays.layoutVertexArray, x, y, 1, -1);
+                addCircleVertex(arrays.layoutVertexArray, x, y, 1, 1);
+                addCircleVertex(arrays.layoutVertexArray, x, y, -1, 1);
 
-                group.elementArray.emplaceBack(index, index + 1, index + 2);
-                group.elementArray.emplaceBack(index, index + 3, index + 2);
+                arrays.elementArray.emplaceBack(index, index + 1, index + 2);
+                arrays.elementArray.emplaceBack(index, index + 3, index + 2);
+
+                segment.vertexLength += 4;
+                segment.primitiveLength += 2;
             }
         }
 
-        this.populatePaintArrays('circle', globalProperties, feature.properties, startGroup, startIndex);
+        arrays.populatePaintArrays(feature.properties);
     }
 }
 

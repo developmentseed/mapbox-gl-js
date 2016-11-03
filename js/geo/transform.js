@@ -112,8 +112,8 @@ class Transform {
         this.scale = this.zoomScale(z);
         this.tileZoom = Math.floor(z);
         this.zoomFraction = z - this.tileZoom;
-        this._calcMatrices();
         this._constrain();
+        this._calcMatrices();
     }
 
     get center() { return this._center; }
@@ -121,8 +121,8 @@ class Transform {
         if (center.lat === this._center.lat && center.lng === this._center.lng) return;
         this._unmodified = false;
         this._center = center;
-        this._calcMatrices();
         this._constrain();
+        this._calcMatrices();
     }
 
     /**
@@ -177,8 +177,8 @@ class Transform {
         this.height = height;
 
         this.pixelsToGLUnits = [2 / width, -2 / height];
-        this._calcMatrices();
         this._constrain();
+        this._calcMatrices();
     }
 
     get unmodified() { return this._unmodified; }
@@ -346,7 +346,7 @@ class Transform {
     /**
      * Calculate the posMatrix that, given a tile coordinate, would be used to display the tile on a map.
      * @param {TileCoord|Coordinate} coord
-     * @param {Number} maxZoom maximum source zoom to account for overscaling
+     * @param {number} maxZoom maximum source zoom to account for overscaling
      * @private
      */
     calculatePosMatrix(coord, maxZoom) {
@@ -453,6 +453,15 @@ class Transform {
         mat4.rotateX(m, m, this._pitch);
         mat4.rotateZ(m, m, this.angle);
         mat4.translate(m, m, [-this.x, -this.y, 0]);
+
+        const circumferenceOfEarth = 2 * Math.PI * 6378137;
+
+        mat4.scale(m, m, [1, 1,
+            // scale vertically to meters per pixel (inverse of ground resolution):
+            // (2^z * tileSize) / (circumferenceOfEarth * cos(lat * π / 180))
+            (Math.pow(2, this.zoom) * this.tileSize) /
+            (circumferenceOfEarth * Math.abs(Math.cos(this.center.lat * (Math.PI / 180)))),
+            1]);
 
         this.projMatrix = m;
 
