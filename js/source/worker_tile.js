@@ -21,9 +21,13 @@ class WorkerTile {
         this.angle = params.angle;
         this.pitch = params.pitch;
         this.showCollisionBoxes = params.showCollisionBoxes;
+        this.parseCount = 0;
     }
 
     parse(data, layerIndex, actor, callback) {
+        this.parseCount++;
+        const parseCount = this.parseCount; // use for checking symbol callback staleness
+
         // Normalize GeoJSON data.
         if (!data.layers) {
             data = { layers: { '_geojsonTileLayer': data } };
@@ -159,6 +163,12 @@ class WorkerTile {
 
         if (Object.keys(stacks).length) {
             actor.send('getGlyphs', {uid: this.uid, stacks: stacks}, (err, newStacks) => {
+                if (parseCount !== this.parseCount) {
+                    // the tile has been re-parsed since, so let the more
+                    // recent callback handle this
+                    callback = function () {}; // unreference closure just in case
+                    return;
+                }
                 stacks = newStacks;
                 gotDependency(err);
             });
@@ -170,6 +180,12 @@ class WorkerTile {
 
         if (icons.length) {
             actor.send('getIcons', {icons: icons}, (err, newIcons) => {
+                if (parseCount !== this.parseCount) {
+                    // the tile has been re-parsed since, so let the more
+                    // recent callback handle this
+                    callback = function () {}; // unreference closure just in case
+                    return;
+                }
                 icons = newIcons;
                 gotDependency(err);
             });

@@ -8,7 +8,9 @@ const ajax = require('../util/ajax');
 const util = require('../util/util');
 const WorkerTile = require('./worker_tile');
 
-const cache = new LRUCache(1 + 4 + 16, () => true);
+// cache up to 4 vector tiles per worker that is usually enough to cover the
+// map even if there is only *one*
+const cache = new LRUCache(4, () => true);
 const preloading = {};
 
 function getCachedTile (url, callback) {
