@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const window = require('../util/window');
 
 class VertexArrayObject {
     constructor() {
@@ -17,12 +18,17 @@ class VertexArrayObject {
             gl.extVertexArrayObject = gl.getExtension("OES_vertex_array_object");
         }
 
+        // https://github.com/developmentseed/wapo-components/issues/2238#issuecomment-258535641
+        const userAgent = String(window.navigator && window.navigator.userAgent);
+        const isSafari = userAgent.toLowerCase().indexOf('safari') >= 0;
+
         const isFreshBindRequired = (
             !this.vao ||
             this.boundProgram !== program ||
             this.boundVertexBuffer !== layoutVertexBuffer ||
             this.boundVertexBuffer2 !== vertexBuffer2 ||
-            this.boundElementBuffer !== elementBuffer
+            this.boundElementBuffer !== elementBuffer ||
+            isSafari
         );
 
         if (!gl.extVertexArrayObject || isFreshBindRequired) {
